@@ -104,6 +104,78 @@
 .horizontal-list { max-height: none; }
 .settings-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
+.backup-protection-panel { overflow: hidden; }
+.backup-health-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 18px 16px;
+  overflow: hidden;
+  border: 1px solid #d7e1e4;
+  border-radius: 12px;
+  background: #d7e1e4;
+}
+.backup-health-strip > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 15px 16px;
+  background: #f7faf9;
+}
+.backup-health-strip span {
+  color: #62737b;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+.backup-health-strip strong { color: #123b4c; font-size: 0.9rem; }
+.backup-health-strip small {
+  overflow: hidden;
+  color: #6b7a82;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backup-health-strip .has-error { background: #fff3f0; }
+.backup-health-strip .has-error strong { color: #9a342b; }
+.backup-warning {
+  margin: 0 18px 14px;
+  padding: 10px 12px;
+  border: 1px solid #efc5bf;
+  border-radius: 8px;
+  color: #8f3028;
+  background: #fff5f3;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.backup-settings-form {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(130px, 0.2fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 0 18px 18px;
+  padding: 14px;
+  border: 1px solid #dce5e8;
+  border-radius: 12px;
+  background: #f8faf9;
+}
+.backup-settings-form label { display: grid; gap: 6px; }
+.backup-settings-form label span {
+  color: #53636b;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.backup-settings-form input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #bac8ce;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.backup-restore-list { margin: 0 18px 18px; }
+.backup-badges { display: flex; gap: 6px; align-items: center; }
+.backup-restore-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+
 .record-modal-card { max-width: 740px; }
 .record-modal-body { display: grid; gap: 10px; max-height: 65vh; overflow: auto; padding: 18px; }
 .record-row { display: grid; gap: 7px; padding: 13px; border: 1px solid #dce5e8; border-radius: 10px; background: #f9fbfb; }
@@ -142,6 +214,10 @@
   .management-form .span-2 { grid-column: span 1; }
   .management-row { grid-template-columns: 1fr; }
   .management-actions { flex-wrap: wrap; }
+  .backup-health-strip,
+  .backup-settings-form { grid-template-columns: 1fr; }
+  .backup-restore-row { grid-template-columns: 1fr; }
+  .backup-badges { flex-wrap: wrap; }
   .report-hero { display: grid; }
   .monthly-bars { gap: 4px; overflow-x: auto; }
 }

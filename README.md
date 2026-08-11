@@ -31,6 +31,16 @@ Password minimal 10 karakter dan harus memiliki huruf besar, huruf kecil, angka,
 
 Database, master harga, lampiran ACES, hasil ekspor, log, backup, `.env`, dan artefak pengujian lokal tidak disimpan di Git. Secara default data aplikasi berada di folder `data`. Lokasinya dapat dipindahkan dengan variabel `QUOTATION_DATA_DIR`.
 
+## Backup dan pemulihan
+
+- Server membuat maksimal satu backup otomatis setiap hari dan memeriksanya kembali setiap 6 jam.
+- Administrator atau Manager Operational dapat membuat backup manual.
+- Administrator dapat mengatur lokasi salinan kedua melalui path absolut/UNC dan retensi 7-3650 hari.
+- Minimal tiga backup terbaru selalu dipertahankan meskipun melewati retensi.
+- Restore hanya dapat dijalankan Administrator, memerlukan pengetikan ulang ID backup, membuat safety backup terlebih dahulu, memverifikasi checksum/integritas, lalu mencabut seluruh sesi login.
+
+Jika variabel `QUOTATION_BACKUP_MIRROR_DIR` diatur pada server, nilainya menjadi tujuan salinan kedua dan mengesampingkan lokasi yang disimpan melalui halaman Pengaturan.
+
 Jalankan pengujian dengan:
 
 ```powershell

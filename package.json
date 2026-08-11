@@ -1,6 +1,6 @@
 {
   "name": "mnn-internal-quotation",
-  "version": "0.8.5",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "MVP web internal untuk quotation FirePro dan PAC.",

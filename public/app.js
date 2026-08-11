@@ -2402,6 +2402,14 @@ function renderSettings() {
   const customers = state.bootstrap.customers || [];
   const templates = state.bootstrap.templates || [];
   const backups = state.bootstrap.backups || [];
+  const backupConfig = state.bootstrap.backupConfig || {
+    backupMirrorPath: "",
+    mirrorRoot: "",
+    mirrorConfigured: false,
+    mirrorStatus: "NONAKTIF",
+    mirrorError: "",
+    backupRetentionDays: 90,
+  };
   const editUser = users.find((item) => item.id === state.userEditId);
   const editCustomer = customers.find((item) => item.id === state.customerEditId);
   const allowedRoles = capabilities.manageAllUsers
@@ -2423,6 +2431,17 @@ function renderSettings() {
       ${capabilities.manageTemplates ? `<section class="management-section panel"><header class="panel-header"><div><span class="eyebrow">TEMPLATE</span><h3>Template quotation aktif</h3><p>Simpan template dari editor agar paket pekerjaan berulang tidak dimulai dari nol.</p></div></header><div class="management-list horizontal-list">${templates.map((item) => `<article class="management-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.packageName)} · oleh ${escapeHtml(item.createdBy)}</small></div><div class="management-actions"><button type="button" data-use-template="${escapeHtml(item.id)}">Gunakan</button><button type="button" data-template-active="false" data-template-id="${escapeHtml(item.id)}">Arsipkan</button></div></article>`).join("") || `<div class="empty-panel"><strong>Belum ada template</strong>Simpan quotation yang sering dipakai dari editor.</div>`}</div></section>` : ""}
 
       ${capabilities.manageBackups ? `<section class="management-section panel"><header class="panel-header"><div><span class="eyebrow">BACKUP OTOMATIS</span><h3>Cadangan database & lampiran</h3><p>Pemeriksaan harian berjalan di server; backup manual dapat dibuat sebelum perubahan penting.</p></div><button class="button button-primary" type="button" data-create-backup>Buat backup sekarang</button></header><div class="management-list horizontal-list">${backups.slice(0, 10).map((item) => `<article class="management-row"><div><strong>${escapeHtml(item.name || item.fileName || "Backup")}</strong><small>${formatDateTime(item.createdAt)} · ${escapeHtml(item.kind || item.reason || "OTOMATIS")}</small></div><span class="status-badge status-ready">TERVERIFIKASI</span></article>`).join("") || `<div class="empty-panel"><strong>Belum ada backup terdaftar</strong>Backup otomatis pertama dibuat saat server aktif.</div>`}</div></section>` : ""}
+      ${capabilities.manageBackups ? `<section class="management-section panel backup-protection-panel">
+        <header class="panel-header"><div><span class="eyebrow">SALINAN KEDUA & RESTORE</span><h3>Proteksi ketika server atau disk bermasalah</h3><p>Backup lokal disalin ke jaringan dan dapat dipulihkan oleh Administrator dengan safety backup otomatis.</p></div></header>
+        <div class="backup-health-strip">
+          <div><span>LOKAL</span><strong>Aktif & terverifikasi</strong><small>Database dan lampiran ACES</small></div>
+          <div class="${backupConfig.mirrorStatus === "GAGAL" ? "has-error" : ""}"><span>JARINGAN</span><strong>${backupConfig.mirrorConfigured ? escapeHtml(backupConfig.mirrorStatus === "TERVERIFIKASI" ? "Terverifikasi" : backupConfig.mirrorStatus === "GAGAL" ? "Gagal tersalin" : "Siap diuji") : "Belum diatur"}</strong><small>${escapeHtml(backupConfig.mirrorRoot || "Atur lokasi UNC untuk salinan kedua")}</small></div>
+          <div><span>RETENSI</span><strong>${Number(backupConfig.backupRetentionDays || 90)} hari</strong><small>Minimal 3 backup terbaru selalu disimpan</small></div>
+        </div>
+        ${backupConfig.mirrorError ? `<p class="backup-warning">Salinan jaringan terakhir gagal: ${escapeHtml(backupConfig.mirrorError)}</p>` : ""}
+        ${capabilities.manageBackupSettings ? `<form id="backup-settings-form" class="backup-settings-form"><label><span>Folder jaringan / UNC</span><input name="backupMirrorPath" value="${escapeHtml(backupConfig.backupMirrorPath || "")}" placeholder="\\\\server\\share\\folder" /></label><label><span>Retensi (hari)</span><input name="backupRetentionDays" type="number" min="7" max="3650" step="1" value="${Number(backupConfig.backupRetentionDays || 90)}" required /></label><button class="button button-secondary" type="submit">Simpan & uji lokasi</button></form>` : ""}
+        <div class="management-list horizontal-list backup-restore-list">${backups.slice(0, 20).map((item) => `<article class="management-row backup-restore-row"><div><strong>${escapeHtml(item.id || "Backup")}</strong><small>${formatDateTime(item.createdAt)} · ${escapeHtml(item.reason || "OTOMATIS")} · ${Number(item.counts?.quotations || 0)} quotation</small></div><div class="backup-badges"><span class="status-badge status-ready">LOKAL OK</span>${backupConfig.mirrorConfigured ? `<span class="status-badge ${item.mirror?.status === "TERVERIFIKASI" ? "status-ready" : "status-review"}">${item.mirror?.status === "TERVERIFIKASI" ? "JARINGAN OK" : "LOKAL SAJA"}</span>` : ""}</div>${capabilities.restoreBackups ? `<button class="button button-small button-danger" type="button" data-restore-backup="${escapeHtml(item.id)}">Pulihkan</button>` : ""}</article>`).join("") || `<div class="empty-panel"><strong>Belum ada titik pemulihan</strong>Buat backup pertama sebelum mencoba pemulihan.</div>`}</div>
+      </section>` : ""}
     </div>`;
   const managedUsernameInput = document.querySelector('#user-management-form input[name="username"]');
   if (managedUsernameInput) {
@@ -2900,14 +2919,52 @@ document.addEventListener("click", async (event) => {
     }
     return;
   }
+  const restoreBackupButton = event.target.closest("[data-restore-backup]");
+  if (restoreBackupButton) {
+    const backupId = restoreBackupButton.dataset.restoreBackup;
+    const confirmation = window.prompt(
+      `Pemulihan akan mengganti seluruh data aplikasi dengan kondisi ${backupId}.\n\nSafety backup dibuat otomatis. Ketik ID backup berikut untuk melanjutkan:\n${backupId}`,
+    );
+    if (confirmation == null) return;
+    if (confirmation.trim() !== backupId) {
+      toast("Pemulihan dibatalkan", "ID backup yang diketik tidak cocok.", "error");
+      return;
+    }
+    if (!window.confirm("Semua pengguna akan dikeluarkan setelah restore. Lanjutkan pemulihan sekarang?")) return;
+    restoreBackupButton.disabled = true;
+    restoreBackupButton.textContent = "Memulihkan...";
+    try {
+      const result = await api(`/api/backups/${encodeURIComponent(backupId)}/restore`, {
+        method: "POST",
+        body: JSON.stringify({ confirmation: backupId }),
+      });
+      state.user = null;
+      state.bootstrap = null;
+      showLogin(`Backup ${result.restoredBackupId} berhasil dipulihkan. Safety backup: ${result.safetyBackupId}. Silakan login kembali.`);
+    } catch (error) {
+      restoreBackupButton.disabled = false;
+      restoreBackupButton.textContent = "Pulihkan";
+      toast("Pemulihan gagal", error.message, "error");
+    }
+    return;
+  }
   if (event.target.closest("[data-create-backup]")) {
     const button = event.target.closest("[data-create-backup]");
     button.disabled = true;
     try {
-      await api("/api/backups", { method: "POST", body: "{}" });
+      const { item } = await api("/api/backups", { method: "POST", body: "{}" });
       await reloadBootstrap(false);
       renderSettings();
-      toast("Backup terverifikasi dibuat", "Database dan lampiran ACES sudah dicadangkan.");
+      if (item.mirror?.status === "GAGAL") {
+        toast("Backup lokal tersimpan", `Salinan jaringan gagal: ${item.mirror.error}`, "error");
+      } else {
+        toast(
+          "Backup terverifikasi dibuat",
+          item.mirror?.status === "TERVERIFIKASI"
+            ? "Database dan lampiran ACES tersimpan lokal serta di jaringan."
+            : "Database dan lampiran ACES sudah dicadangkan secara lokal.",
+        );
+      }
     } catch (error) {
       button.disabled = false;
       toast("Backup gagal", error.message, "error");
@@ -3623,6 +3680,33 @@ document.addEventListener("submit", async (event) => {
       toast("Progres belum tersimpan", error.message, "error");
     } finally {
       button.disabled = false;
+    }
+    return;
+  }
+  if (form.matches("#backup-settings-form")) {
+    event.preventDefault();
+    const button = form.querySelector("button[type='submit']");
+    button.disabled = true;
+    button.textContent = "Menguji lokasi...";
+    try {
+      const payload = Object.fromEntries(new FormData(form));
+      payload.backupRetentionDays = Number(payload.backupRetentionDays);
+      const { config } = await api("/api/backups/settings", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      await reloadBootstrap(false);
+      renderSettings();
+      toast(
+        "Pengaturan backup tersimpan",
+        config.mirrorConfigured
+          ? "Folder jaringan dapat ditulis. Buat backup untuk menguji salinan lengkap."
+          : "Salinan jaringan dinonaktifkan; backup lokal tetap berjalan.",
+      );
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Simpan & uji lokasi";
+      toast("Lokasi backup belum tersimpan", error.message, "error");
     }
     return;
   }

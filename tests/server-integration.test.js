@@ -57,6 +57,7 @@ async function request(baseUrl, cookie, pathname, options = {}) {
 
 test("server enforces Manager user scope and exposes verified backups and reports", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "mnn-server-roadmap-"));
+  const mirrorDir = fs.mkdtempSync(path.join(os.tmpdir(), "mnn-server-mirror-"));
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   let stderr = "";
@@ -79,7 +80,7 @@ test("server enforces Manager user scope and exposes verified backups and report
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   try {
     const health = await waitForHealth(baseUrl, () => stderr);
-    assert.equal(health.version, "0.8.5");
+    assert.equal(health.version, "0.9.0");
     const rememberedLogin = await fetch(`${baseUrl}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -148,6 +149,44 @@ test("server enforces Manager user scope and exposes verified backups and report
       body: JSON.stringify({ username: "admin.api", displayName: "Admin API", role: "ADMIN", password: "Admin#Api2026" }),
     });
     assert.equal(createdAdmin.status, 201);
+
+    const backupSettings = await request(baseUrl, adminCookie, "/api/backups/settings", {
+      method: "PUT",
+      body: JSON.stringify({ backupMirrorPath: mirrorDir, backupRetentionDays: 30 }),
+    });
+    assert.equal(backupSettings.status, 200);
+    assert.equal((await backupSettings.json()).config.mirrorConfigured, true);
+    const mirroredBackup = await request(baseUrl, adminCookie, "/api/backups", {
+      method: "POST",
+      body: "{}",
+    });
+    assert.equal(mirroredBackup.status, 201);
+    const mirroredItem = (await mirroredBackup.json()).item;
+    assert.equal(mirroredItem.mirror.status, "TERVERIFIKASI", mirroredItem.mirror.error);
+    assert.equal(
+      fs.existsSync(path.join(mirrorDir, "MNN-Quotation-Backups", mirroredItem.id, "quotation-internal.db")),
+      true,
+    );
+    const markerUser = await request(baseUrl, adminCookie, "/api/users", {
+      method: "POST",
+      body: JSON.stringify({ username: "restore.marker", displayName: "Restore Marker", role: "SUPPORT", password: "Restore#Marker2026" }),
+    });
+    assert.equal(markerUser.status, 201);
+    const restoreResponse = await request(
+      baseUrl,
+      adminCookie,
+      `/api/backups/${encodeURIComponent(mirroredItem.id)}/restore`,
+      { method: "POST", body: JSON.stringify({ confirmation: mirroredItem.id }) },
+    );
+    assert.equal(restoreResponse.status, 200);
+    const restored = await restoreResponse.json();
+    assert.equal(restored.restoredBackupId, mirroredItem.id);
+    assert.match(restored.safetyBackupId, /^backup-/);
+    assert.equal((await request(baseUrl, adminCookie, "/api/users")).status, 401);
+    const adminAfterRestore = await login(baseUrl, "admin", "Admin@MNN2026");
+    const usersAfterRestore = await request(baseUrl, adminAfterRestore, "/api/users");
+    assert.equal(usersAfterRestore.status, 200);
+    assert.equal((await usersAfterRestore.json()).items.some((item) => item.username === "restore.marker"), false);
   } finally {
     child.kill("SIGTERM");
     await Promise.race([
@@ -155,5 +194,6 @@ test("server enforces Manager user scope and exposes verified backups and report
       new Promise((resolve) => setTimeout(resolve, 3000)),
     ]);
     fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.rmSync(mirrorDir, { recursive: true, force: true });
   }
 });

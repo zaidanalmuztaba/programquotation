@@ -27,7 +27,7 @@ const dataDir = process.env.QUOTATION_DATA_DIR
   : path.join(appDir, "data");
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 3180);
-const store = createStore({ dataDir, seedPath });
+let store = createStore({ dataDir, seedPath });
 const priceUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
@@ -43,17 +43,36 @@ const standardSessionSeconds = 12 * 60 * 60;
 const rememberedSessionSeconds = 30 * 24 * 60 * 60;
 const loginAttempts = new Map();
 let backupInProgress = null;
+let restoreInProgress = false;
 
 function backupTimestamp(date = new Date()) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return date.toISOString().replace(/[-:.]/g, "");
 }
 
-function listBackups() {
-  if (!fs.existsSync(backupsDataDir)) return [];
-  return fs.readdirSync(backupsDataDir, { withFileTypes: true })
+function assertDirectChild(root, candidate) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedCandidate = path.resolve(candidate);
+  if (path.dirname(resolvedCandidate) !== resolvedRoot) {
+    throw new Error("Lokasi backup berada di luar folder yang diizinkan.");
+  }
+  return resolvedCandidate;
+}
+
+function backupDirectory(backupId, root = backupsDataDir) {
+  const id = String(backupId || "").trim();
+  if (!/^backup-\d{8}T\d{6}(?:\d{3})?Z$/.test(id)) {
+    throw new Error("ID backup tidak valid.");
+  }
+  return assertDirectChild(root, path.join(root, id));
+}
+
+function listBackups(root = backupsDataDir) {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
-      const directory = path.join(backupsDataDir, entry.name);
+      if (!/^backup-\d{8}T\d{6}(?:\d{3})?Z$/.test(entry.name)) return null;
+      const directory = backupDirectory(entry.name, root);
       const manifestPath = path.join(directory, "manifest.json");
       if (!fs.existsSync(manifestPath)) return null;
       try {
@@ -66,24 +85,146 @@ function listBackups() {
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
 }
 
+function backupConfiguration() {
+  const settings = store.getSettings();
+  const configuredPath = String(
+    process.env.QUOTATION_BACKUP_MIRROR_DIR || settings.backupMirrorPath || "",
+  ).trim();
+  const retentionDays = Math.min(
+    3650,
+    Math.max(7, Math.round(Number(settings.backupRetentionDays) || 90)),
+  );
+  const mirrorRoot = configuredPath
+    ? path.join(path.resolve(configuredPath), "MNN-Quotation-Backups")
+    : "";
+  const latest = listBackups()[0] || null;
+  return {
+    backupMirrorPath: configuredPath,
+    mirrorRoot,
+    mirrorConfigured: Boolean(configuredPath),
+    mirrorStatus: latest?.mirror?.status || (configuredPath ? "BELUM_DICOBA" : "NONAKTIF"),
+    mirrorError: latest?.mirror?.error || "",
+    backupRetentionDays: retentionDays,
+  };
+}
+
+function validateMirrorPath(value, { writeTest = false } = {}) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return "";
+  if (!path.isAbsolute(candidate)) {
+    throw new Error("Lokasi salinan jaringan harus berupa path absolut atau UNC.");
+  }
+  const resolved = path.resolve(candidate);
+  if (resolved === path.parse(resolved).root) {
+    throw new Error("Lokasi salinan jaringan tidak boleh berupa root drive/share.");
+  }
+  const resolvedData = path.resolve(dataDir);
+  if (resolved === resolvedData || resolved.startsWith(`${resolvedData}${path.sep}`)) {
+    throw new Error("Salinan kedua harus berada di luar folder data utama.");
+  }
+  if (writeTest) {
+    fs.mkdirSync(resolved, { recursive: true });
+    const probe = path.join(resolved, `.mnn-backup-write-test-${crypto.randomUUID()}.tmp`);
+    try {
+      fs.writeFileSync(probe, "MNN backup write test", { flag: "wx" });
+    } finally {
+      if (fs.existsSync(probe)) fs.rmSync(probe);
+    }
+  }
+  return resolved;
+}
+
+function databaseVerification(databasePath, expectedSha256 = "") {
+  const buffer = fs.readFileSync(databasePath);
+  const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+  if (expectedSha256 && sha256 !== expectedSha256) {
+    throw new Error("Checksum database backup tidak sesuai manifest.");
+  }
+  const verification = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const integrity = verification.prepare("PRAGMA integrity_check").get()?.integrity_check;
+    if (integrity !== "ok") throw new Error("Integritas database backup tidak valid.");
+    return { integrity, sha256, bytes: buffer.length };
+  } finally {
+    verification.close();
+  }
+}
+
+function verifiedBackup(backupId) {
+  const directory = backupDirectory(backupId);
+  const manifestPath = path.join(directory, "manifest.json");
+  const databasePath = path.join(directory, "quotation-internal.db");
+  if (!fs.existsSync(manifestPath) || !fs.existsSync(databasePath)) {
+    throw new Error("File backup tidak lengkap atau tidak ditemukan.");
+  }
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  if (manifest.id !== backupId) throw new Error("Manifest backup tidak cocok dengan foldernya.");
+  const verification = databaseVerification(databasePath, manifest.databaseSha256);
+  return { directory, databasePath, manifest, verification };
+}
+
+function writeManifest(directory, manifest) {
+  fs.writeFileSync(
+    path.join(directory, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+function mirrorBackup(directory, manifest, mirrorRoot) {
+  fs.mkdirSync(mirrorRoot, { recursive: true });
+  const destination = backupDirectory(manifest.id, mirrorRoot);
+  const staging = assertDirectChild(mirrorRoot, path.join(mirrorRoot, `${manifest.id}.staging`));
+  if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+  if (fs.existsSync(destination)) fs.rmSync(destination, { recursive: true, force: true });
+  try {
+    fs.cpSync(directory, staging, { recursive: true, errorOnExist: true });
+    fs.renameSync(staging, destination);
+    databaseVerification(
+      path.join(destination, "quotation-internal.db"),
+      manifest.databaseSha256,
+    );
+    return destination;
+  } catch (error) {
+    if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function pruneExpiredBackups(root, retentionDays, currentId = "") {
+  if (!root || !fs.existsSync(root)) return [];
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const items = listBackups(root);
+  const removed = [];
+  for (const [index, item] of items.entries()) {
+    if (index < 3 || item.id === currentId) continue;
+    const createdAt = Date.parse(item.createdAt);
+    if (!Number.isFinite(createdAt) || createdAt >= cutoff) continue;
+    const directory = backupDirectory(item.id, root);
+    fs.rmSync(directory, { recursive: true, force: true });
+    removed.push(item.id);
+  }
+  return removed;
+}
+
 async function performBackup(reason = "MANUAL", actor = "System") {
   if (backupInProgress) return backupInProgress;
   backupInProgress = (async () => {
     const createdAt = new Date().toISOString();
     const backupId = `backup-${backupTimestamp(new Date(createdAt))}`;
-    const directory = path.join(backupsDataDir, backupId);
+    const directory = backupDirectory(backupId);
     const databasePath = path.join(directory, "quotation-internal.db");
     fs.mkdirSync(directory, { recursive: true });
     const result = await store.backupDatabase(databasePath);
-    const verification = new DatabaseSync(databasePath, { readOnly: true });
-    const integrity = verification.prepare("PRAGMA integrity_check").get()?.integrity_check;
+    const verificationDatabase = new DatabaseSync(databasePath, { readOnly: true });
+    const integrity = verificationDatabase.prepare("PRAGMA integrity_check").get()?.integrity_check;
     const counts = {
-      quotations: Number(verification.prepare("SELECT COUNT(*) AS total FROM quotations").get().total),
-      prices: Number(verification.prepare("SELECT COUNT(*) AS total FROM prices").get().total),
-      users: Number(verification.prepare("SELECT COUNT(*) AS total FROM users").get().total),
-      quotationNumbers: Number(verification.prepare("SELECT COUNT(*) AS total FROM quotation_numbers").get().total),
+      quotations: Number(verificationDatabase.prepare("SELECT COUNT(*) AS total FROM quotations").get().total),
+      prices: Number(verificationDatabase.prepare("SELECT COUNT(*) AS total FROM prices").get().total),
+      users: Number(verificationDatabase.prepare("SELECT COUNT(*) AS total FROM users").get().total),
+      quotationNumbers: Number(verificationDatabase.prepare("SELECT COUNT(*) AS total FROM quotation_numbers").get().total),
     };
-    verification.close();
+    verificationDatabase.close();
     if (integrity !== "ok") throw new Error("Verifikasi integritas backup database gagal.");
     if (fs.existsSync(acesDataDir)) {
       fs.cpSync(acesDataDir, path.join(directory, "aces"), { recursive: true });
@@ -99,8 +240,50 @@ async function performBackup(reason = "MANUAL", actor = "System") {
       databaseBytes: databaseBuffer.length,
       databaseSha256: crypto.createHash("sha256").update(databaseBuffer).digest("hex"),
       counts,
+      mirror: { status: "NONAKTIF", path: "", completedAt: null, error: "" },
     };
-    fs.writeFileSync(path.join(directory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    writeManifest(directory, manifest);
+    const configuration = backupConfiguration();
+    if (configuration.mirrorConfigured) {
+      try {
+        const mirrorDestination = mirrorBackup(directory, manifest, configuration.mirrorRoot);
+        manifest.mirror = {
+          status: "TERVERIFIKASI",
+          path: mirrorDestination,
+          completedAt: new Date().toISOString(),
+          error: "",
+        };
+        writeManifest(directory, manifest);
+        writeManifest(mirrorDestination, manifest);
+      } catch (error) {
+        manifest.mirror = {
+          status: "GAGAL",
+          path: configuration.mirrorRoot,
+          completedAt: null,
+          error: String(error.message || error).slice(0, 300),
+        };
+        writeManifest(directory, manifest);
+      }
+    }
+    manifest.retention = {
+      days: configuration.backupRetentionDays,
+      removedLocal: pruneExpiredBackups(
+        backupsDataDir,
+        configuration.backupRetentionDays,
+        backupId,
+      ),
+      removedMirror: configuration.mirrorConfigured
+        ? pruneExpiredBackups(
+            configuration.mirrorRoot,
+            configuration.backupRetentionDays,
+            backupId,
+          )
+        : [],
+    };
+    writeManifest(directory, manifest);
+    if (manifest.mirror.status === "TERVERIFIKASI") {
+      writeManifest(manifest.mirror.path, manifest);
+    }
     store.recordAudit(null, "BACKUP_CREATE", actor, manifest);
     return manifest;
   })();
@@ -108,6 +291,89 @@ async function performBackup(reason = "MANUAL", actor = "System") {
     return await backupInProgress;
   } finally {
     backupInProgress = null;
+  }
+}
+
+async function restoreBackup(backupId, actor) {
+  if (restoreInProgress) throw new Error("Pemulihan backup lain masih berjalan.");
+  restoreInProgress = true;
+  const timestamp = backupTimestamp();
+  const stagingDatabase = path.join(dataDir, `restore-staging-${timestamp}.db`);
+  const rollbackDatabase = path.join(dataDir, `restore-rollback-${timestamp}.db`);
+  const stagingAces = path.join(dataDir, `restore-staging-${timestamp}-aces`);
+  const rollbackAces = path.join(dataDir, `restore-rollback-${timestamp}-aces`);
+  const liveDatabase = store.databasePath;
+  let storeClosed = false;
+  let databaseMoved = false;
+  let acesMoved = false;
+  try {
+    const source = verifiedBackup(backupId);
+    const preservedSettings = backupConfiguration();
+    fs.copyFileSync(source.databasePath, stagingDatabase);
+    databaseVerification(stagingDatabase, source.manifest.databaseSha256);
+    if (fs.existsSync(stagingAces)) fs.rmSync(stagingAces, { recursive: true, force: true });
+    if (fs.existsSync(path.join(source.directory, "aces"))) {
+      fs.cpSync(path.join(source.directory, "aces"), stagingAces, { recursive: true });
+    } else {
+      fs.mkdirSync(stagingAces, { recursive: true });
+    }
+    const safety = await performBackup("PRE_RESTORE_SAFETY", actor);
+
+    store.close();
+    storeClosed = true;
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = `${liveDatabase}${suffix}`;
+      if (fs.existsSync(sidecar)) fs.rmSync(sidecar);
+    }
+    fs.renameSync(liveDatabase, rollbackDatabase);
+    databaseMoved = true;
+    fs.renameSync(stagingDatabase, liveDatabase);
+    if (fs.existsSync(acesDataDir)) {
+      fs.renameSync(acesDataDir, rollbackAces);
+      acesMoved = true;
+    }
+    fs.renameSync(stagingAces, acesDataDir);
+
+    store = createStore({ dataDir, seedPath });
+    storeClosed = false;
+    store.updateBackupSettings(
+      {
+        backupRetentionDays: preservedSettings.backupRetentionDays,
+        backupMirrorPath: preservedSettings.backupMirrorPath,
+      },
+      actor,
+    );
+    const revokedSessions = store.invalidateAllSessions(actor);
+    store.recordAudit(null, "BACKUP_RESTORE", actor, {
+      restoredBackupId: backupId,
+      safetyBackupId: safety.id,
+      revokedSessions,
+      sourceSha256: source.manifest.databaseSha256,
+    });
+    if (fs.existsSync(rollbackDatabase)) fs.rmSync(rollbackDatabase);
+    if (fs.existsSync(rollbackAces)) fs.rmSync(rollbackAces, { recursive: true, force: true });
+    return { restoredBackupId: backupId, safetyBackupId: safety.id, revokedSessions };
+  } catch (error) {
+    try {
+      if (!storeClosed) store.close();
+    } catch {}
+    if (databaseMoved && fs.existsSync(rollbackDatabase)) {
+      if (fs.existsSync(liveDatabase)) fs.rmSync(liveDatabase);
+      fs.renameSync(rollbackDatabase, liveDatabase);
+    }
+    if (acesMoved && fs.existsSync(rollbackAces)) {
+      if (fs.existsSync(acesDataDir)) fs.rmSync(acesDataDir, { recursive: true, force: true });
+      fs.renameSync(rollbackAces, acesDataDir);
+    }
+    store = createStore({ dataDir, seedPath });
+    throw error;
+  } finally {
+    for (const candidate of [stagingDatabase, stagingAces]) {
+      if (!fs.existsSync(candidate)) continue;
+      const stats = fs.statSync(candidate);
+      fs.rmSync(candidate, { recursive: stats.isDirectory(), force: true });
+    }
+    restoreInProgress = false;
   }
 }
 
@@ -499,11 +765,21 @@ function creatorInitialsFrom(value, fallback = "YN") {
   return initials;
 }
 
+app.use("/api", (request, response, next) => {
+  if (restoreInProgress) {
+    response.setHeader("Retry-After", "5");
+    return response.status(503).json({
+      error: "Server sedang memulihkan backup. Coba kembali setelah beberapa detik.",
+    });
+  }
+  return next();
+});
+
 app.get("/api/health", (request, response) => {
   response.json({
     ok: true,
     service: "MNN Internal Quotation",
-    version: "0.8.5",
+    version: "0.9.0",
     database: path.basename(store.databasePath),
     timestamp: new Date().toISOString(),
   });
@@ -581,6 +857,8 @@ app.get("/api/bootstrap", (request, response) => {
       manageUsers: canManageUsers,
       manageAllUsers: role === "ADMIN",
       manageBackups: ["ADMIN", "OPERATIONS_MANAGER"].includes(role),
+      restoreBackups: role === "ADMIN",
+      manageBackupSettings: role === "ADMIN",
       manageCustomers: ["ADMIN", "SUPPORT", "PRESALES"].includes(role),
       manageTemplates: ["ADMIN", "SUPPORT", "PRESALES"].includes(role),
       approveTechnical: approvalRoles("TECHNICAL").includes(role),
@@ -595,6 +873,9 @@ app.get("/api/bootstrap", (request, response) => {
     templates: store.listQuotationTemplates(false),
     users,
     backups: ["ADMIN", "OPERATIONS_MANAGER"].includes(role) ? listBackups().slice(0, 20) : [],
+    backupConfig: ["ADMIN", "OPERATIONS_MANAGER"].includes(role)
+      ? backupConfiguration()
+      : null,
   });
 });
 
@@ -656,6 +937,44 @@ app.post("/api/backups", allowRoles("ADMIN", "OPERATIONS_MANAGER"), async (reque
   try {
     const item = await performBackup("MANUAL", actorFrom(request));
     return response.status(201).json({ item });
+  } catch (error) {
+    return response.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/api/backups/settings", allowRoles("ADMIN"), (request, response) => {
+  try {
+    const backupMirrorPath = validateMirrorPath(request.body?.backupMirrorPath, {
+      writeTest: Boolean(String(request.body?.backupMirrorPath || "").trim()),
+    });
+    store.updateBackupSettings(
+      {
+        backupRetentionDays: Number(request.body?.backupRetentionDays),
+        backupMirrorPath,
+      },
+      actorFrom(request),
+    );
+    return response.json({ config: backupConfiguration() });
+  } catch (error) {
+    return response.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/backups/:id/restore", allowRoles("ADMIN"), async (request, response) => {
+  const backupId = String(request.params.id || "").trim();
+  if (String(request.body?.confirmation || "").trim() !== backupId) {
+    return response.status(400).json({
+      error: "Konfirmasi pemulihan tidak cocok dengan ID backup.",
+    });
+  }
+  try {
+    const result = await restoreBackup(backupId, actorFrom(request));
+    response.setHeader("Set-Cookie", sessionCookie(request, "", 0));
+    return response.json({
+      ok: true,
+      ...result,
+      loginRequired: true,
+    });
   } catch (error) {
     return response.status(500).json({ error: error.message });
   }
