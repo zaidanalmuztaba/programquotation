@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Aplikasi internal quotation FirePro dan PAC PT. Matur Nuwun Nusantara."
+    />
+    <title>MNN Quotation Desk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section class="login-screen" id="login-screen">
+      <div class="login-brand-panel">
+        <div class="login-logo"><img src="/logo-mnn.png" alt="Logo PT. Matur Nuwun Nusantara" /></div>
+        <span class="eyebrow">MNN INTERNAL WORKSPACE</span>
+        <h1>Satu alur kerja, dari harga Logistik sampai quotation customer.</h1>
+        <p>Masuk menggunakan akun divisi Anda. Aktivitas harga, quotation, dan perubahan progres akan tercatat otomatis.</p>
+        <div class="login-flow">
+          <span>01 · Logistik</span><i></i><span>02 · Support / Presales</span><i></i><span>03 · Manager Operational</span>
+        </div>
+      </div>
+      <div class="login-form-panel">
+        <form class="login-card" id="login-form">
+          <span class="eyebrow">AKSES TERKONTROL</span>
+          <h2>Masuk ke Quotation Desk</h2>
+          <p>Gunakan username dan password akun divisi.</p>
+          <label>
+            <span>Username</span>
+            <input name="username" autocomplete="username" required autofocus />
+          </label>
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <label class="remember-login">
+            <input name="rememberMe" type="checkbox" value="true" />
+            <span>Ingat saya selama 30 hari</span>
+          </label>
+          <small class="remember-help">Gunakan hanya pada komputer pribadi/kantor yang Anda pegang. Password tidak disimpan oleh aplikasi dan tombol Keluar langsung mencabut sesi.</small>
+          <p class="login-error" id="login-error" role="alert" hidden></p>
+          <button class="button button-primary login-button" type="submit">Masuk</button>
+          <small>Password awal wajib diganti dari menu Pengaturan setelah berhasil masuk.</small>
+        </form>
+      </div>
+    </section>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">
+            <img src="/logo-mnn.png" alt="Logo PT. Matur Nuwun Nusantara" />
+          </div>
+          <div>
+            <strong>Quotation Desk</strong>
+            <small>MNN • Internal</small>
+          </div>
+        </div>
+
+        <nav class="nav-stack" aria-label="Navigasi utama">
+          <button class="nav-item is-active" data-view="dashboard">
+            <span class="nav-index">01</span>
+            <span>Ringkasan</span>
+          </button>
+          <button class="nav-item" data-view="editor" data-roles="ADMIN,SUPPORT,PRESALES">
+            <span class="nav-index">02</span>
+            <span>Buat Penawaran</span>
+          </button>
+          <button class="nav-item" data-view="history" data-roles="ADMIN,SUPPORT,PRESALES,OPERATIONS_MANAGER">
+            <span class="nav-index">03</span>
+            <span>Riwayat QN</span>
+          </button>
+          <button class="nav-item" data-view="tracking">
+            <span class="nav-index">04</span>
+            <span>Tracking</span>
+          </button>
+          <button class="nav-item" data-view="prices">
+            <span class="nav-index">05</span>
+            <span>Master Harga</span>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <span class="nav-index">06</span>
+            <span>Pengaturan</span>
+          </button>
+          <button class="nav-item" data-view="reports" data-roles="ADMIN,OPERATIONS_MANAGER">
+            <span class="nav-index">07</span>
+            <span>Laporan</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-note">
+          <span class="pulse-dot"></span>
+          <div>
+            <strong id="server-state">Menghubungkan...</strong>
+            <small>Data tersimpan di server lokal</small>
+          </div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <button class="mobile-menu" id="mobile-menu" aria-label="Buka menu">
+            <span></span><span></span>
+          </button>
+          <div class="topbar-context">
+            <span class="eyebrow">PT. MATUR NUWUN NUSANTARA</span>
+            <strong id="page-title">Ringkasan quotation</strong>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip" id="user-chip">
+              <span class="user-avatar" id="user-avatar">M</span>
+              <div><strong id="user-name">Pengguna</strong><small id="user-role">Divisi</small></div>
+            </div>
+            <button class="button button-ghost button-small" id="logout-button" type="button">Keluar</button>
+            <div class="date-chip" id="today-chip"></div>
+          </div>
+        </header>
+
+        <main id="app-view" class="app-view" tabindex="-1">
+          <div class="loading-state">
+            <div class="loading-mark"></div>
+            <p>Menyiapkan meja quotation...</p>
+          </div>
+        </main>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="price-modal" hidden>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="price-modal-title">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow">MASTER TERPUSAT</span>
+            <h2 id="price-modal-title">Tambahkan item harga</h2>
+          </div>
+          <button class="icon-button" data-close-modal aria-label="Tutup">×</button>
+        </header>
+        <div class="modal-search">
+          <input
+            id="modal-price-search"
+            type="search"
+            placeholder="Cari kode, material, FirePro, atau PAC..."
+            autocomplete="off"
+          />
+          <select id="modal-price-package" aria-label="Filter paket">
+            <option value="">Semua sumber</option>
+            <option value="FirePro">FirePro</option>
+            <option value="PAC">PAC</option>
+            <option value="Material">Material</option>
+          </select>
+        </div>
+        <div class="modal-results" id="modal-price-results"></div>
+        <footer class="modal-footer">
+          <span>Material belum ada?</span>
+          <button class="button button-amber" type="button" data-open-manual-price>
+            + Buat harga manual
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="manual-price-modal" hidden>
+      <section
+        class="modal-card modal-card-form"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="manual-price-modal-title"
+      >
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow">HARGA BARU • SUPPORT</span>
+            <h2 id="manual-price-modal-title">Catat material yang belum ada</h2>
+            <p>
+              Harga dapat dipakai untuk quotation, tetapi tetap berlabel
+              “Perlu Verifikasi Logistik”.
+            </p>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            data-close-manual-price
+            aria-label="Tutup"
+          >
+            ×
+          </button>
+        </header>
+        <form id="manual-price-form" class="modal-form">
+          <label class="field col-4">
+            <span>Kode (opsional)</span>
+            <input name="code" maxlength="50" placeholder="Otomatis bila kosong" />
+          </label>
+          <label class="field col-4">
+            <span>Kelompok</span>
+            <select name="packageName">
+              <option value="Material">Material</option>
+              <option value="FirePro">FirePro</option>
+              <option value="PAC">PAC</option>
+            </select>
+          </label>
+          <label class="field col-4">
+            <span>Kategori</span>
+            <input name="category" value="Material Support" required />
+          </label>
+          <label class="field col-12">
+            <span>Nama material</span>
+            <input name="description" required placeholder="Nama dan spesifikasi material" />
+          </label>
+          <label class="field col-3">
+            <span>Satuan</span>
+            <input name="unit" required placeholder="unit / bh / mtr" />
+          </label>
+          <label class="field col-4">
+            <span>Harga satuan</span>
+            <input name="price" type="number" min="1" step="1" required />
+          </label>
+          <label class="field col-5">
+            <span>Tanggal harga</span>
+            <input name="snapshotDate" type="date" required />
+          </label>
+          <label class="field col-6">
+            <span>Supplier / sumber</span>
+            <input name="supplier" required placeholder="Nama supplier atau sumber informasi" />
+          </label>
+          <label class="field col-6">
+            <span>Bukti / referensi</span>
+            <input
+              name="evidenceRef"
+              required
+              placeholder="No. penawaran supplier, email, chat, atau file"
+            />
+          </label>
+          <label class="field col-12">
+            <span>Catatan (opsional)</span>
+            <textarea name="notes" placeholder="Keterangan tambahan untuk tim Logistik"></textarea>
+          </label>
+          <div class="modal-form-note col-12">
+            Setelah Logistik memasukkan kode ini ke
+            <strong>PRICELIST MATERIAL_SUPPORT.xlsx</strong> dan pricelist
+            diimpor ulang, data resmi akan menggantikan status manual.
+          </div>
+          <footer class="modal-form-actions col-12">
+            <button class="button button-ghost" type="button" data-close-manual-price>
+              Batal
+            </button>
+            <button class="button button-amber" type="submit">
+              Simpan harga manual
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="logistics-price-modal" hidden>
+      <section class="modal-card modal-card-form" role="dialog" aria-modal="true" aria-labelledby="logistics-price-title">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow">MASTER RESMI · LOGISTIK</span>
+            <h2 id="logistics-price-title">Tambah harga stok</h2>
+            <p>Harga ini langsung berstatus terverifikasi dan dapat dipakai Support/Presales.</p>
+          </div>
+          <button class="icon-button" type="button" data-close-logistics-price aria-label="Tutup">×</button>
+        </header>
+        <form id="logistics-price-form" class="modal-form">
+          <label class="field col-4"><span>Kode material</span><input name="code" maxlength="50" required /></label>
+          <label class="field col-4"><span>Kelompok</span><select name="packageName"><option value="Material">Material</option><option value="FirePro">FirePro</option><option value="PAC">PAC</option></select></label>
+          <label class="field col-4"><span>Kategori</span><input name="category" value="Material Support" required /></label>
+          <label class="field col-12"><span>Nama dan spesifikasi material</span><input name="description" required /></label>
+          <label class="field col-3"><span>Satuan</span><input name="unit" required placeholder="unit / bh / mtr" /></label>
+          <label class="field col-4"><span>Harga satuan</span><input name="price" type="number" min="1" step="1" required /></label>
+          <label class="field col-5"><span>Tanggal harga</span><input name="snapshotDate" type="date" required /></label>
+          <label class="field col-6"><span>Supplier</span><input name="supplier" required /></label>
+          <label class="field col-6"><span>Bukti pembelian / referensi</span><input name="evidenceRef" required placeholder="PO, invoice, atau quotation supplier" /></label>
+          <label class="field col-12"><span>Catatan</span><textarea name="notes"></textarea></label>
+          <footer class="modal-form-actions col-12">
+            <button class="button button-ghost" type="button" data-close-logistics-price>Batal</button>
+            <button class="button button-primary" type="submit">Simpan ke master Logistik</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="workflow-modal" hidden>
+      <section class="modal-card modal-card-form workflow-modal-card" role="dialog" aria-modal="true" aria-labelledby="workflow-modal-title">
+        <header class="modal-header">
+          <div><span class="eyebrow">PROGRES QUOTATION</span><h2 id="workflow-modal-title">Perbarui status</h2><p id="workflow-modal-subtitle"></p></div>
+          <button class="icon-button" type="button" data-close-workflow aria-label="Tutup">×</button>
+        </header>
+        <form id="workflow-form" class="modal-form">
+          <input type="hidden" name="quotationId" />
+          <label class="field col-12"><span>Status progres</span><select name="status" required>
+            <option value="DRAFT">Draft</option><option value="WAITING_PRICE">Menunggu Harga</option><option value="CALCULATION">Perhitungan</option><option value="INTERNAL_REVIEW">Review Internal</option><option value="SENT">Terkirim ke Customer</option><option value="FOLLOW_UP">Follow-up</option><option value="WON">Menang / PO</option><option value="LOST">Kalah</option><option value="CANCELLED">Dibatalkan</option>
+          </select></label>
+          <label class="field col-6"><span>Tanggal follow-up</span><input name="followUpAt" type="date" /><small>Wajib jika status Follow-up.</small></label>
+          <label class="field col-6"><span>Alasan hasil</span><select name="outcomeReason">
+            <option value="">Pilih bila kalah/dibatalkan</option>
+            <option value="Harga">Harga</option><option value="Spesifikasi">Spesifikasi</option><option value="Kompetitor">Kompetitor</option><option value="Project ditunda">Project ditunda</option><option value="Project dibatalkan">Project dibatalkan</option><option value="Tidak ada respons">Tidak ada respons</option><option value="Lainnya">Lainnya</option>
+          </select><small>Wajib untuk status Kalah atau Dibatalkan.</small></label>
+          <label class="field col-12"><span>Catatan progres</span><textarea name="note" maxlength="500" placeholder="Contoh: menunggu harga kabel dari Logistik atau follow-up tanggal 15 Agustus"></textarea><small>Wajib untuk Menunggu Harga, Follow-up, Kalah, dan Dibatalkan.</small></label>
+          <footer class="modal-form-actions col-12"><button class="button button-ghost" type="button" data-close-workflow>Batal</button><button class="button button-primary" type="submit">Simpan progres</button></footer>
+        </form>
+      </section>
+    </div>
+
+    <div
+      class="modal-backdrop document-preview-backdrop"
+      id="document-preview-modal"
+      hidden
+    >
+      <section
+        class="modal-card document-preview-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="document-preview-title"
+      >
+        <header class="modal-header document-preview-header">
+          <div>
+            <span class="eyebrow">DOKUMEN CUSTOMER</span>
+            <h2 id="document-preview-title">Preview Surat + Lampiran RAB</h2>
+            <p>
+              Word dan PDF akan berisi surat penawaran di halaman depan,
+              dilanjutkan RAB detail sebagai lampiran.
+            </p>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            data-close-document-preview
+            aria-label="Tutup preview"
+          >
+            ×
+          </button>
+        </header>
+        <nav class="document-preview-tabs" aria-label="Bagian dokumen">
+          <button class="is-active" type="button" data-preview-tab="letter">
+            <span>01</span>
+            Surat Penawaran
+          </button>
+          <button type="button" data-preview-tab="rab">
+            <span>02</span>
+            Lampiran RAB
+          </button>
+        </nav>
+        <div class="document-preview-body" id="document-preview-body"></div>
+        <footer class="modal-footer document-preview-footer">
+          <p>
+            Preview hanya menampilkan data customer. Harga sumber, markup, dan
+            catatan internal tidak ikut dicetak.
+          </p>
+          <div class="document-preview-actions">
+            <button class="button button-amber" type="button" data-print-document>
+              Print Surat + RAB
+            </button>
+            <button class="button button-ghost" type="button" data-export="docx">
+              Unduh Word + RAB
+            </button>
+            <button class="button button-primary" type="button" data-export="pdf">
+              Unduh PDF + RAB
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="record-modal" hidden>
+      <section class="modal-card modal-card-form record-modal-card" role="dialog" aria-modal="true" aria-labelledby="record-modal-title">
+        <header class="modal-header">
+          <div><span class="eyebrow" id="record-modal-eyebrow">DETAIL</span><h2 id="record-modal-title">Detail catatan</h2><p id="record-modal-subtitle"></p></div>
+          <button class="icon-button" type="button" data-close-record-modal aria-label="Tutup">Ã—</button>
+        </header>
+        <div class="record-modal-body" id="record-modal-body"></div>
+      </section>
+    </div>
+
+    <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

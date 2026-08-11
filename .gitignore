@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Operational databases, uploads, logs, and backups
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+backups/
+uploads/
+seed/price-master.json
+scripts/build-seed.mjs
+
+# Generated and local verification artifacts
+qa/
+coverage/
+dist/
+build/
+generated/
+outputs/
+tmp/
+temp/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
